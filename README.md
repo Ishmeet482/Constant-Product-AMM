@@ -247,6 +247,4 @@ Key security features:
 - **Overflow Protection**: u128 arithmetic for large values
 - **Access Control**: Protocol fee withdrawal restricted
 
-## License
 
-MIT License
