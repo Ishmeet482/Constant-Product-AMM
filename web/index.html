@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sui AMM Demo - Pools & Swaps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <h1>Sui AMM Demo</h1>
+        <p>Simulated pools and swaps (x * y = k, fee in bps).</p>
+      </header>
+
+      <main class="app-main">
+        <section class="card">
+          <h2>Create Pool</h2>
+          <div class="form-grid">
+            <label>
+              Token A
+              <input id="tokenA" placeholder="e.g. USDC" />
+            </label>
+            <label>
+              Token B
+              <input id="tokenB" placeholder="e.g. SUI" />
+            </label>
+            <label>
+              Fee (bps)
+              <input id="feeBps" type="number" value="30" />
+            </label>
+            <label>
+              Initial reserve A
+              <input id="reserveA" type="number" value="1000000" />
+            </label>
+            <label>
+              Initial reserve B
+              <input id="reserveB" type="number" value="1000000" />
+            </label>
+          </div>
+          <button id="createPoolBtn">Create Pool</button>
+          <p id="createPoolMsg" class="message"></p>
+        </section>
+
+        <section class="card">
+          <h2>Pools</h2>
+          <table class="pools-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Pair</th>
+                <th>Fee (bps)</th>
+                <th>Reserves (A/B)</th>
+              </tr>
+            </thead>
+            <tbody id="poolsBody"></tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2>Swap</h2>
+          <div class="form-grid">
+            <label>
+              Pool
+              <select id="swapPoolSelect"></select>
+            </label>
+            <label>
+              Direction
+              <select id="swapDirection">
+                <option value="a2b">Token A → Token B</option>
+                <option value="b2a">Token B → Token A</option>
+              </select>
+            </label>
+            <label>
+              Amount In
+              <input id="swapAmountIn" type="number" value="100000" />
+            </label>
+            <label>
+              Slippage tolerance (%)
+              <input id="slipTolerance" type="number" value="1" />
+            </label>
+          </div>
+          <button id="quoteBtn">Get Quote</button>
+          <button id="executeBtn">Execute Swap</button>
+          <div id="swapResult" class="message"></div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const BPS_DENOMINATOR = 10000;
+
+      class Pool {
+        constructor(id, tokenA, tokenB, feeBps, reserveA, reserveB) {
+          this.id = id;
+          this.tokenA = tokenA;
+          this.tokenB = tokenB;
+          this.feeBps = feeBps;
+          this.reserveA = reserveA;
+          this.reserveB = reserveB;
+        }
+      }
+
+      const pools = [];
+
+      function renderPools() {
+        const body = document.getElementById('poolsBody');
+        const select = document.getElementById('swapPoolSelect');
+        body.innerHTML = '';
+        select.innerHTML = '';
+        if (pools.length === 0) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 4;
+          cell.textContent = 'No pools created yet.';
+          row.appendChild(cell);
+          body.appendChild(row);
+          return;
+        }
+        for (const p of pools) {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${p.id}</td>
+            <td>${p.tokenA}/${p.tokenB}</td>
+            <td>${p.feeBps}</td>
+            <td>${p.reserveA} / ${p.reserveB}</td>
+          `;
+          body.appendChild(row);
+
+          const opt = document.createElement('option');
+          opt.value = String(p.id);
+          opt.textContent = `[${p.id}] ${p.tokenA}/${p.tokenB}`;
+          select.appendChild(opt);
+        }
+      }
+
+      function getAmountOut(pool, amountIn, aToB) {
+        if (amountIn <= 0) return { amountOut: 0, fee: 0 };
+        const reserveIn = aToB ? pool.reserveA : pool.reserveB;
+        const reserveOut = aToB ? pool.reserveB : pool.reserveA;
+        if (reserveIn <= 0 || reserveOut <= 0) return { amountOut: 0, fee: 0 };
+
+        const fee = Math.floor((amountIn * pool.feeBps) / BPS_DENOMINATOR);
+        const amountInAfterFee = amountIn - fee;
+        const numerator = amountInAfterFee * reserveOut;
+        const denominator = reserveIn + amountInAfterFee;
+        const amountOut = Math.floor(numerator / denominator);
+        return { amountOut, fee };
+      }
+
+      function swap(pool, amountIn, aToB) {
+        const { amountOut, fee } = getAmountOut(pool, amountIn, aToB);
+        if (amountOut <= 0) return { amountOut, fee };
+        if (aToB) {
+          pool.reserveA += amountIn;
+          pool.reserveB -= amountOut;
+        } else {
+          pool.reserveB += amountIn;
+          pool.reserveA -= amountOut;
+        }
+        return { amountOut, fee };
+      }
+
+      document.getElementById('createPoolBtn').addEventListener('click', () => {
+        const tokenA = (document.getElementById('tokenA').value || 'TKA').trim();
+        const tokenB = (document.getElementById('tokenB').value || 'TKB').trim();
+        const feeBps = parseInt(document.getElementById('feeBps').value || '30', 10) || 30;
+        const reserveA = parseInt(document.getElementById('reserveA').value || '1000000', 10) || 1000000;
+        const reserveB = parseInt(document.getElementById('reserveB').value || '1000000', 10) || 1000000;
+        const msg = document.getElementById('createPoolMsg');
+
+        if (!Number.isFinite(reserveA) || !Number.isFinite(reserveB) || reserveA <= 0 || reserveB <= 0) {
+          msg.textContent = 'Reserves must be positive numbers.';
+          msg.classList.add('error');
+          return;
+        }
+
+        const id = pools.length + 1;
+        const pool = new Pool(id, tokenA, tokenB, feeBps, reserveA, reserveB);
+        pools.push(pool);
+        msg.textContent = `Created pool [${pool.id}] ${pool.tokenA}/${pool.tokenB}.`;
+        msg.classList.remove('error');
+        renderPools();
+      });
+
+      document.getElementById('quoteBtn').addEventListener('click', () => {
+        const select = document.getElementById('swapPoolSelect');
+        const resDiv = document.getElementById('swapResult');
+        if (pools.length === 0 || !select.value) {
+          resDiv.textContent = 'No pool selected.';
+          resDiv.classList.add('error');
+          return;
+        }
+        const pool = pools.find(p => String(p.id) === select.value);
+        const dir = document.getElementById('swapDirection').value;
+        const aToB = dir === 'a2b';
+        const amountIn = parseInt(document.getElementById('swapAmountIn').value, 10) || 0;
+        const slipPct = parseFloat(document.getElementById('slipTolerance').value || '1');
+        const { amountOut, fee } = getAmountOut(pool, amountIn, aToB);
+        if (amountOut <= 0) {
+          resDiv.textContent = 'Invalid swap (check amount and reserves).';
+          resDiv.classList.add('error');
+          return;
+        }
+        const minOut = Math.floor(amountOut * (1 - slipPct / 100));
+        resDiv.textContent = `Quote: output=${amountOut}, minOut=${minOut}, fee=${fee}`;
+        resDiv.classList.remove('error');
+      });
+
+      document.getElementById('executeBtn').addEventListener('click', () => {
+        const select = document.getElementById('swapPoolSelect');
+        const resDiv = document.getElementById('swapResult');
+        if (pools.length === 0 || !select.value) {
+          resDiv.textContent = 'No pool selected.';
+          resDiv.classList.add('error');
+          return;
+        }
+        const pool = pools.find(p => String(p.id) === select.value);
+        const dir = document.getElementById('swapDirection').value;
+        const aToB = dir === 'a2b';
+        const amountIn = parseInt(document.getElementById('swapAmountIn').value, 10) || 0;
+        const slipPct = parseFloat(document.getElementById('slipTolerance').value || '1');
+
+        const { amountOut, fee } = getAmountOut(pool, amountIn, aToB);
+        if (amountOut <= 0) {
+          resDiv.textContent = 'Invalid swap (check amount and reserves).';
+          resDiv.classList.add('error');
+          return;
+        }
+        const minOut = Math.floor(amountOut * (1 - slipPct / 100));
+        if (amountOut < minOut) {
+          resDiv.textContent = 'Swap would violate slippage constraint.';
+          resDiv.classList.add('error');
+          return;
+        }
+
+        const result = swap(pool, amountIn, aToB);
+        renderPools();
+        resDiv.textContent = `Executed swap. Received=${result.amountOut}, fee=${result.fee}.`;
+        resDiv.classList.remove('error');
+      });
+
+      renderPools();
+    </script>
+  </body>
+</html>

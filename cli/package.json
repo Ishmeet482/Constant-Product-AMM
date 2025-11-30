@@ -1,0 +1,9 @@
+{
+  "name": "sui-amm-nft-lp-cli",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  }
+}
